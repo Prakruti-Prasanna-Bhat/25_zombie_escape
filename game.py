@@ -78,9 +78,7 @@ class Player:
         dist = (dx**2+dy**2)**0.5
         if dist == 0: return
         vx, vy = dx/dist*10, dy/dist*10
-        self.bullets.append(pygame.Rect(cx-4, cy-4, 8, 8))
         self.bullets.append([cx-4, cy-4, vx, vy])
-        self.bullets.pop(-2)
         self.shoot_cooldown = 15
 
     def update_bullets(self, width, height):
@@ -111,6 +109,7 @@ class GameEngine:
         self.player = Player(WIDTH//2, HEIGHT//2)
         self.zombies = [spawn_zombie(WIDTH, HEIGHT, self.player.rect) for _ in range(4)]
         self.score = 0
+        self.kill_bonus = 0
         self.wave = 1
         self.kills = 0
         self.kills_to_next = 8
@@ -130,7 +129,7 @@ class GameEngine:
         keys = pygame.key.get_pressed()
         self.player.move(keys, WIDTH, HEIGHT)
         self.player.update_bullets(WIDTH, HEIGHT)
-        self.score = int(time.time() - self.start_time)
+        self.score = int(time.time() - self.start_time) + self.kill_bonus
 
         for z in self.zombies:
             z.update(self.player.rect.center)
@@ -150,7 +149,7 @@ class GameEngine:
             if z in self.zombies:
                 self.zombies.remove(z)
                 self.kills += 1
-                self.score += 10
+                self.kill_bonus += 10
 
         if self.kills >= self.kills_to_next:
             self.kills = 0
