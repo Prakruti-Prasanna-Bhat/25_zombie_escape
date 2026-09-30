@@ -5,6 +5,7 @@ import time
 
 WIDTH, HEIGHT = 800, 560
 FPS = 60
+HUD_HEIGHT = 64
 BG = (30,35,25)
 
 
@@ -26,6 +27,8 @@ class Zombie:
         if dist:
             self.rect.x += int(dx/dist*self.SPEED)
             self.rect.y += int(dy/dist*self.SPEED)
+        self.rect.x = max(0, min(WIDTH - self.rect.width, self.rect.x))
+        self.rect.y = max(HUD_HEIGHT, min(HEIGHT - self.rect.height, self.rect.y))
         self.frame += 1
 
     def hit(self):
@@ -43,7 +46,7 @@ class Zombie:
 def spawn_zombie(width, height, player_rect, margin=120):
     while True:
         x = random.randint(0, width-30)
-        y = random.randint(0, height-30)
+        y = random.randint(HUD_HEIGHT, height-30)
         rect = pygame.Rect(x, y, 30, 30)
         if not rect.colliderect(player_rect.inflate(margin, margin)):
             return Zombie(x, y)
@@ -58,6 +61,10 @@ class Player:
         self.color = (60,160,220)
         self.bullets = []
         self.shoot_cooldown = 0
+        self.hp = 3
+        self.invincibility_timer = 0
+        self.ammo = 12
+        self.reload_timer = 0
 
     def move(self, keys, width, height):
         dx = dy = 0
@@ -66,12 +73,23 @@ class Player:
         if keys[pygame.K_a] or keys[pygame.K_LEFT]: dx = -SPEED
         if keys[pygame.K_d] or keys[pygame.K_RIGHT]: dx = SPEED
         self.rect.x = max(0, min(width-self.rect.width, self.rect.x+dx))
-        self.rect.y = max(0, min(height-self.rect.height, self.rect.y+dy))
+        self.rect.y = max(HUD_HEIGHT, min(height-self.rect.height, self.rect.y+dy))
         if self.shoot_cooldown > 0:
             self.shoot_cooldown -= 1
+        if self.invincibility_timer > 0:
+            self.invincibility_timer -= 1
+        if self.reload_timer > 0:
+            self.reload_timer -= 1
+            if self.reload_timer == 0:
+                self.ammo = 12
 
     def shoot(self, target_pos):
-        if self.shoot_cooldown > 0: return
+        if self.shoot_cooldown > 0:
+            return
+        if self.reload_timer > 0:
+            return
+        if self.ammo <= 0:
+            return
         cx, cy = self.rect.center
         tx, ty = target_pos
         dx, dy = tx-cx, ty-cy
@@ -79,7 +97,10 @@ class Player:
         if dist == 0: return
         vx, vy = dx/dist*10, dy/dist*10
         self.bullets.append([cx-4, cy-4, vx, vy])
+        self.ammo -= 1
         self.shoot_cooldown = 15
+        if self.ammo == 0:
+            self.reload_timer = FPS * 2
 
     def update_bullets(self, width, height):
         live = []
@@ -90,7 +111,10 @@ class Player:
         self.bullets = live
 
     def draw(self, screen):
-        pygame.draw.rect(screen, self.color, self.rect, border_radius=6)
+        draw_color = self.color
+        if self.invincibility_timer > 0 and (self.invincibility_timer // 6) % 2 == 0:
+            draw_color = (255, 255, 255)
+        pygame.draw.rect(screen, draw_color, self.rect, border_radius=6)
         for b in self.bullets:
             pygame.draw.circle(screen, (255,220,60), (int(b[0]), int(b[1])), 5)
 
@@ -134,7 +158,11 @@ class GameEngine:
         for z in self.zombies:
             z.update(self.player.rect.center)
             if z.rect.colliderect(self.player.rect):
-                self.game_over = True
+                if self.player.invincibility_timer == 0:
+                    self.player.hp -= 1
+                    self.player.invincibility_timer = 90
+                    if self.player.hp <= 0:
+                        self.game_over = True
 
         dead = []
         for z in self.zombies:
@@ -155,8 +183,13 @@ class GameEngine:
             self.kills = 0
             self.wave += 1
             self.kills_to_next = 8 + self.wave * 2
-            for _ in range(self.wave + 3):
+            for _ in range(min(4, self.kills_to_next)):
                 self.zombies.append(spawn_zombie(WIDTH, HEIGHT, self.player.rect))
+        elif not self.zombies:
+            remaining = self.kills_to_next - self.kills
+            for _ in range(min(4, remaining)):
+                self.zombies.append(spawn_zombie(WIDTH, HEIGHT, self.player.rect))
+
 
     def draw(self):
         self.screen.fill(BG)
@@ -166,12 +199,21 @@ class GameEngine:
             pygame.draw.line(self.screen, (40,45,35), (0,y), (WIDTH,y), 1)
         for z in self.zombies: z.draw(self.screen)
         self.player.draw(self.screen)
-        hud_bg = pygame.Rect(0, 0, WIDTH, 40)
+        hud_bg = pygame.Rect(0, 0, WIDTH, HUD_HEIGHT)
         pygame.draw.rect(self.screen, (15,20,15), hud_bg)
-        hud = self.font.render(
-            f"Wave: {self.wave}  Score: {self.score}  Kills: {self.kills}/{self.kills_to_next}  |  WASD Move, Click Shoot, R Restart",
+        hud_top = self.font.render(
+            f"Wave: {self.wave}  HP: {self.player.hp}  Score: {self.score}  Kills: {self.kills}/{self.kills_to_next}",
             True, (160,220,120))
-        self.screen.blit(hud, (8, 8))
+        self.screen.blit(hud_top, (8, 4))
+        if self.player.reload_timer > 0:
+            reload_seconds = self.player.reload_timer / FPS
+            ammo_text = f"Reloading: {reload_seconds:.1f}s"
+        else:
+            ammo_text = f"Ammo: {self.player.ammo}/12"
+        hud_bottom = self.font.render(
+            f"{ammo_text}  |  WASD Move, Click Shoot, R Restart",
+            True, (160,220,120))
+        self.screen.blit(hud_bottom, (8, 34))
         if self.game_over:
             ov = pygame.Surface((WIDTH, HEIGHT), pygame.SRCALPHA)
             ov.fill((0,0,0,160))
